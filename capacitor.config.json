@@ -1,0 +1,12 @@
+{
+  "appId": "com.volna.player",
+  "appName": "Волна",
+  "webDir": "www",
+  "backgroundColor": "#11131a",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#11131a",
+    "scrollEnabled": false,
+    "allowsLinkPreview": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "volna-ios",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Волна: the web player wrapped as a native iPhone app (Capacitor)",
+  "scripts": {
+    "prepare-web": "node prepare.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "7.6.10",
+    "@capacitor/ios": "7.6.10"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.6.10"
+  }
+}

@@ -1,0 +1,65 @@
+# Builds Volna.ipa on a GitHub Mac. The file is NOT signed: Sideloadly signs it with your Apple ID when installing.
+# Start it: Actions → "Сборка для iPhone" → Run workflow. It also runs by itself after every upload to main.
+name: Сборка для iPhone
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Capacitor
+        run: npm install --no-audit --no-fund
+
+      - name: Put the tag reader inside the app (works without internet)
+        run: |
+          mkdir -p www/vendor
+          curl -fsSL https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js -o www/vendor/jsmediatags.min.js
+          sed -i '' 's#https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js#vendor/jsmediatags.min.js#g' www/index.html
+          grep -c 'vendor/jsmediatags.min.js' www/index.html
+
+      - name: Create the Xcode project
+        run: npx cap add ios
+
+      - name: Add background audio, system volume, name and icon
+        run: bash native/patch-ios.sh
+
+      - name: Copy the player into the project
+        run: npx cap sync ios
+
+      - name: Build (unsigned)
+        run: |
+          if [ -d ios/App/App.xcworkspace ]; then SRC=(-workspace ios/App/App.xcworkspace); else SRC=(-project ios/App/App.xcodeproj); fi
+          if ! xcodebuild "${SRC[@]}" -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath build/App.xcarchive archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" > build.log 2>&1; then
+            echo "===== errors ====="; grep -E "error:|fatal error" build.log | head -60
+            echo "===== end of log ====="; tail -n 120 build.log
+            exit 1
+          fi
+          tail -n 15 build.log
+          test -d build/App.xcarchive/Products/Applications/App.app
+
+      - name: Pack Volna.ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/App.xcarchive/Products/Applications/App.app Payload/
+          zip -qry Volna.ipa Payload
+          ls -l Volna.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Volna-ipa
+          path: Volna.ipa
+          retention-days: 30
