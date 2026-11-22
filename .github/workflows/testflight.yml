@@ -1,0 +1,91 @@
+# Builds «Волна», signs it with your Apple Developer account and uploads it to TestFlight.
+# Needs four repository secrets (Settings → Secrets and variables → Actions):
+#   APPLE_TEAM_ID        — Team ID (10 characters, developer.apple.com → Membership)
+#   ASC_KEY_ID           — App Store Connect API key ID
+#   ASC_ISSUER_ID        — Issuer ID shown above the list of keys
+#   ASC_KEY_P8           — full text of the downloaded AuthKey_XXXX.p8 file
+# Start it: Actions → "TestFlight" → Run workflow. It also runs by itself after every upload to main.
+name: TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: Check the Apple keys are set
+        id: keys
+        run: |
+          if [ -z "$TEAM_ID" ] || [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ] || [ -z "$ASC_KEY_P8" ]; then
+            echo "::warning::Apple keys are not set yet (see the top of testflight.yml), TestFlight upload skipped"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.keys.outputs.ok == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.keys.outputs.ok == 'true'
+        with:
+          node-version: 22
+
+      - name: Prepare the Xcode project
+        if: steps.keys.outputs.ok == 'true'
+        run: |
+          npm install --no-audit --no-fund
+          mkdir -p www/vendor
+          curl -fsSL https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js -o www/vendor/jsmediatags.min.js
+          sed -i '' 's#https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js#vendor/jsmediatags.min.js#g' www/index.html
+          npx cap add ios
+          bash native/patch-ios.sh
+          npx cap sync ios
+
+      - name: API key for signing
+        if: steps.keys.outputs.ok == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
+          echo "KEY_PATH=$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" >> "$GITHUB_ENV"
+
+      - name: Build and sign
+        if: steps.keys.outputs.ok == 'true'
+        run: |
+          if [ -d ios/App/App.xcworkspace ]; then SRC=(-workspace ios/App/App.xcworkspace); else SRC=(-project ios/App/App.xcodeproj); fi
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          if ! xcodebuild "${SRC[@]}" -scheme App -configuration Release \
+               -destination 'generic/platform=iOS' -archivePath build/App.xcarchive archive "${AUTH[@]}" > build.log 2>&1; then
+            echo "===== errors ====="; grep -E "error:|fatal error" build.log | head -60
+            echo "===== end of log ====="; tail -n 120 build.log
+            exit 1
+          fi
+          tail -n 10 build.log
+
+      - name: Upload to TestFlight
+        if: steps.keys.outputs.ok == 'true'
+        run: |
+          sed "s/TEAM_ID_PLACEHOLDER/$TEAM_ID/" native/ExportOptions.plist > build/ExportOptions.plist
+          if ! xcodebuild -exportArchive -archivePath build/App.xcarchive -exportPath build/export \
+               -exportOptionsPlist build/ExportOptions.plist \
+               -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" > upload.log 2>&1; then
+            echo "===== errors ====="; grep -iE "error|failed" upload.log | head -60
+            echo "===== end of log ====="; tail -n 120 upload.log
+            exit 1
+          fi
+          tail -n 20 upload.log
+          echo "::notice::Build $BUILD_NUMBER uploaded. In 5–15 minutes it appears in TestFlight on your iPhone."
+
+      - name: Remove the key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keys"

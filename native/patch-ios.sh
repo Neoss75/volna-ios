@@ -23,6 +23,21 @@ PL="$APP/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PL"
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PL"
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Волна" "$PL" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Волна" "$PL"
+# only standard HTTPS: no export-compliance questions in App Store Connect for every build
+/usr/libexec/PlistBuddy -c "Delete :ITSAppUsesNonExemptEncryption" "$PL" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PL"
+
+# 3b. project settings: iPhone only; for signed builds the team and a build number that grows every run
+PBX=ios/App/App.xcodeproj/project.pbxproj
+sed -i '' 's/TARGETED_DEVICE_FAMILY = "1,2";/TARGETED_DEVICE_FAMILY = 1;/' "$PBX"
+if [ -n "${BUILD_NUMBER:-}" ]; then
+  sed -i '' "s/CURRENT_PROJECT_VERSION = 1;/CURRENT_PROJECT_VERSION = ${BUILD_NUMBER};/" "$PBX"
+fi
+if [ -n "${TEAM_ID:-}" ]; then
+  sed -i '' "s/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Automatic;\\
+				DEVELOPMENT_TEAM = ${TEAM_ID};/" "$PBX"
+  grep -q "DEVELOPMENT_TEAM = ${TEAM_ID};" "$PBX" || { echo "team was not set"; exit 1; }
+fi
 
 # 4. icon and launch screen: every picture in the template is replaced, resized to the size it had
 fit() { # fit <source.png> <folder>

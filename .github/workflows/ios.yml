@@ -1,11 +1,9 @@
 # Builds Volna.ipa on a GitHub Mac. The file is NOT signed: Sideloadly signs it with your Apple ID when installing.
-# Start it: Actions → "Сборка для iPhone" → Run workflow. It also runs by itself after every upload to main.
-name: Сборка для iPhone
+# Spare way to install without TestFlight. Start it by hand: Actions → "Сборка для iPhone (Sideloadly)" → Run workflow.
+name: Сборка для iPhone (Sideloadly)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 jobs:
   ipa:
